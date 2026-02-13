@@ -6,7 +6,25 @@ SINGER requires [FiGS-Standalone](https://github.com/StanfordMSL/FiGS-Standalone
 
 ### Prerequisites
 
-- Docker with NVIDIA Container Toolkit
+- NVIDIA GPU with drivers installed
+- Docker Engine ([install guide](https://docs.docker.com/engine/install/ubuntu/))
+- NVIDIA Container Toolkit (for GPU access inside containers):
+
+```bash
+# Add the NVIDIA container toolkit repository
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+  | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+
+# Configure Docker to use the NVIDIA runtime and restart
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
 - FiGS-Standalone repository (for the base Docker image)
 
 ### 1) Clone repositories
@@ -20,21 +38,26 @@ git clone https://github.com/StanfordMSL/SINGER.git
 
 ```bash
 cd FiGS-Standalone
-docker-compose build
+CUDA_ARCHITECTURES=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '.') docker compose build
 ```
 
-### 3) Run SINGER development environment
+### 3) Build the SINGER image (layers on top of FiGS)
 
 ```bash
 cd SINGER
-docker-compose run singer
+docker compose build
+```
+
+### 4) Run SINGER development environment
+
+```bash
+docker compose run --rm singer
 ```
 
 This will:
-- Use the `figs:latest` base image
-- Mount SINGER and FiGS-Standalone for editable development
-- Auto-install packages on first run
-- Persist installed packages across container restarts
+- Use the `singer:latest` image (extends `figs:latest` with SINGER-specific deps)
+- Mount SINGER, FiGS-Standalone, and coverage_view_selection for editable development
+- Auto-install editable packages on startup
 
 ### Configuration
 
@@ -52,10 +75,10 @@ After changes to FiGS-Standalone's Dockerfile:
 
 ```bash
 cd FiGS-Standalone
-docker-compose build
+CUDA_ARCHITECTURES=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '.') docker compose build
 
-# Clear SINGER's cached packages
+# Rebuild SINGER image on top of updated FiGS
 cd ../SINGER
-docker-compose down -v
-docker-compose run singer
+docker compose build
+docker compose run --rm singer
 ```

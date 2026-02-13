@@ -1,4 +1,5 @@
-queries: ["green clock", "green and pink leafblower", "yellow handheld cordless drill on two boxes"]
+# queries: ["green clock", "green and pink leafblower", "yellow handheld cordless drill on two boxes"]
+queries: ["green clock"]
 # queries: ["mannequin", "textbook on stool", "water barrel"]
 # queries: ["mannequin", "water barrel", ""]
 # queries: ["mannequin", "water barrel"]
@@ -9,25 +10,25 @@ queries: ["green clock", "green and pink leafblower", "yellow handheld cordless 
 
 radii:
   - [ 2.0,  0.4]   # for "mannequin"
-  - [ 2.0,  0.4]   # for "ladder"
-  - [ 2.0,  0.4]   # for "microwave"
+  # - [ 2.0,  0.4]   # for "ladder"
+  # - [ 2.0,  0.4]   # for "microwave"
   # - [ 1.0,  0.4]   # for "mannequin"
 altitudes:
   - -1.0            # flight height for "mannequin"
-  - -1.0           # flight height for "ladder”
-  - -1.0            # flight height for "water barrel"
+  # - -1.0           # flight height for "ladder”
+  # - -1.0            # flight height for "water barrel"
   # - -1.0
 
 similarities:
   - [ 0.90, 0.025 ]  # threshold, filter radius
-  - [ 0.90, 0.025 ]
-  - [ 0.90, 0.025 ]
+  # - [ 0.90, 0.025 ]
+  # - [ 0.90, 0.025 ]
   # - [ 0.90, 0.025 ]
 
 nbranches:
   - 110
-  - 110
-  - 110
+  # - 110
+  # - 110
   # - 110
 
 hoverMode: False

@@ -8,7 +8,28 @@ from re import T, X
 
 import numpy as np
 import torch
+import av
 from torchvision.io import write_video
+
+# Patch PyAV pict_type compatibility (newer PyAV requires int, not string)
+_orig_write_video = write_video
+def write_video(filename, video_array, fps, **kwargs):
+    try:
+        _orig_write_video(filename, video_array, fps, **kwargs)
+    except TypeError:
+        # Fallback: write video manually with PyAV
+        container = av.open(filename, mode="w")
+        stream = container.add_stream("h264", rate=fps)
+        stream.width = video_array.shape[2]
+        stream.height = video_array.shape[1]
+        stream.pix_fmt = "yuv420p"
+        for img in video_array.numpy().astype("uint8"):
+            frame = av.VideoFrame.from_ndarray(img, format="rgb24")
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+        container.close()
 from torchvision.transforms import Resize
 from acados_template import AcadosSimSolver
 
@@ -24,7 +45,6 @@ from figs.control.vehicle_rate_mpc import VehicleRateMPC
 # import sousvide.synthesize.synthesize_helper as sh
 import sousvide.synthesize.rollout_generator as gd
 import sousvide.visualize.record_flight as rf
-from torchvision.io import write_video
 from torchvision.transforms import Resize
 from figs.simulator import Simulator
 import figs.utilities.trajectory_helper as th
@@ -68,6 +88,12 @@ def simulate_roster(cohort_name:str,method_name:str,
     with open(os.path.join(perception_cfg_dir, "onnx_benchmark_config.json")) as json_file:
         perception_config = json.load(json_file)
     onnx_model_path = perception_config.get("onnx_model_path", None)
+
+    # Read perception_mode.yml to determine vision processing mode
+    import yaml as _yaml
+    with open(os.path.join(perception_cfg_dir, "perception_mode.yml")) as f:
+        _perception_mode = _yaml.safe_load(f)
+    _perception_type = _perception_mode.get("perception_type", "similarity")
         
     with open(method_path) as json_file:
         method_config = json.load(json_file)
@@ -99,7 +125,7 @@ def simulate_roster(cohort_name:str,method_name:str,
     rollout_name = sample_set_config["rollout"]
     policy_name = sample_set_config["policy"]
     frame_name = sample_set_config["frame"]
-    use_clip   = sample_set_config["clipseg"]
+    use_clip   = (_perception_type == "clipseg")
 
 
     # Extract policy and frame
@@ -169,8 +195,12 @@ def simulate_roster(cohort_name:str,method_name:str,
         if rrt_mode:
             trajectory_dataset = {}
             for scene_name,course_name in flights:
-                scene_cfg_file = os.path.join(scenes_cfg_dir, f"{scene_name}.yml")
-                combined_prefix = os.path.join(scenes_cfg_dir, scene_name)
+                # scene_name can be a simple name ("flightroom_ssv_exp") or a
+                # specific gsplat path ("flightroom_ssv_exp/splatfacto/2026-02-10_184843").
+                # Use the base name for SINGER config lookup and file naming.
+                base_scene_name = scene_name.split("/")[0]
+                scene_cfg_file = os.path.join(scenes_cfg_dir, f"{base_scene_name}.yml")
+                combined_prefix = os.path.join(scenes_cfg_dir, base_scene_name)
                 with open(scene_cfg_file) as f:
                     scene_cfg = yaml.safe_load(f)
 
@@ -188,7 +218,7 @@ def simulate_roster(cohort_name:str,method_name:str,
                     env_bounds["minbound"] = np.array(scene_cfg["minbound"])
                     env_bounds["maxbound"] = np.array(scene_cfg["maxbound"])
 
-                # Generate simulator
+                # Generate simulator (full scene_name resolves to unique gsplat config)
                 simulator = Simulator(scene_name,rollout_name)
 
                 # RRT-based trajectories
@@ -219,7 +249,7 @@ def simulate_roster(cohort_name:str,method_name:str,
             #FIXME
                 # Save the complete RRT tree for each objective
                 for obj_name in objectives:
-                    rrt_tree_file = os.path.join(rrt_data_dir, f"{scene_name}_rrt_tree_{obj_name}.pkl")
+                    rrt_tree_file = os.path.join(rrt_data_dir, f"{base_scene_name}_rrt_tree_{obj_name}.pkl")
                     with open(rrt_tree_file, "wb") as f:
                         pickle.dump(raw_rrt_paths[obj_name], f)
                     print(f"Saved complete RRT tree for {obj_name}: {len(raw_rrt_paths[obj_name])} paths")
@@ -243,7 +273,7 @@ def simulate_roster(cohort_name:str,method_name:str,
                     print(f"{obj_name}: {len(filtered)} branches")
                 #FIXME
                     # Save all filtered trajectories
-                    filtered_file = os.path.join(rrt_data_dir, f"{scene_name}_filtered_{obj_name}.pkl")
+                    filtered_file = os.path.join(rrt_data_dir, f"{base_scene_name}_filtered_{obj_name}.pkl")
                     with open(filtered_file, "wb") as f:
                         pickle.dump(filtered, f)
                     print(f"Saved {len(filtered)} filtered trajectories for {obj_name}")
@@ -332,11 +362,13 @@ def simulate_roster(cohort_name:str,method_name:str,
         print("Review mode enabled. Loading trajectory dataset from files.")
         trajectory_dataset = {}
         for scene_name, course_name in flights:
-            # Generate simulator
+            base_scene_name = scene_name.split("/")[0]
+
+            # Generate simulator (full scene_name resolves to unique gsplat config)
             simulator = Simulator(scene_name,rollout_name)
 
-            scene_cfg_file = os.path.join(scenes_cfg_dir, f"{scene_name}.yml")
-            combined_prefix = os.path.join(scenes_cfg_dir, scene_name)
+            scene_cfg_file = os.path.join(scenes_cfg_dir, f"{base_scene_name}.yml")
+            combined_prefix = os.path.join(scenes_cfg_dir, base_scene_name)
             with open(scene_cfg_file) as f:
                 scene_cfg = yaml.safe_load(f)
             objectives      = scene_cfg["queries"]
@@ -393,10 +425,10 @@ def simulate_roster(cohort_name:str,method_name:str,
             print(f"Simulating pilot '{pilot_name}' on objective '{obj_name}'")
 
             traj_file = os.path.join(
-                trajectories_dir, f"sim_data_{scene_name}_{obj_name}_{pilot_name}.pt"
+                trajectories_dir, f"sim_data_{base_scene_name}_{obj_name}_{pilot_name}.pt"
             )
             vid_file = os.path.join(
-                videos_dir, f"sim_video_{scene_name}_{obj_name}_{pilot_name}.mp4"
+                videos_dir, f"sim_video_{base_scene_name}_{obj_name}_{pilot_name}.mp4"
             )
 
             if pilot_name == "expert":
@@ -417,15 +449,15 @@ def simulate_roster(cohort_name:str,method_name:str,
                 #     print(f"simulating loiter trajectory with query: null")
                 #     Tro,Xro,Uro,Iro,Tsol,Adv = simulator.simulate(
                 #         policy,perturbation["t0"],tXUi[0,-1],perturbation["x0"],np.zeros((18,1)),
-                #         query="null",clipseg=vision_processor,verbose=verbose)
+                #         query="null",vision_processor=vision_processor,verbose=verbose)
             #
                 # else:
                 # Normal simulation for non-loiter trajectories
                 Tro,Xro,Uro,Iro,Tsol,Adv = simulator.simulate(
                     policy,perturbation["t0"],tXUi[0,-1],perturbation["x0"],np.zeros((18,1)),
-                    query=obj_name,clipseg=vision_processor,verbose=verbose)
+                    query=obj_name,vision_processor=vision_processor,verbose=verbose)
                 # Tro,Xro,Uro,Iro,Tsol,Adv = simulator.simulate(
-                #     policy,perturbation["t0"],tXUi[0,-1],perturbation["x0"],np.zeros((18,1)),query=obj_name,clipseg=vision_processor)
+                #     policy,perturbation["t0"],tXUi[0,-1],perturbation["x0"],np.zeros((18,1)),query=obj_name,vision_processor=vision_processor)
 
                 # Save Trajectory
                 trajectory = {
@@ -581,9 +613,10 @@ def simulate_roster(cohort_name:str,method_name:str,
                     objective = "_".join(parts[:-1])
                     
                     # Clean up objective (remove scene prefix)
-                    for scene_name, _ in flights:
-                        if objective.startswith(scene_name + "_"):
-                            objective = objective[len(scene_name) + 1:]
+                    for flight_scene, _ in flights:
+                        base = flight_scene.split("/")[0]
+                        if objective.startswith(base + "_"):
+                            objective = objective[len(base) + 1:]
                             break
                     
                     pilots_tested.add(pilot)

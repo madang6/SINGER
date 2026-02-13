@@ -10,7 +10,15 @@ authors = [{ name = "JunEn Low", email = "lowjunen@gmail.com" }, { name = "Maxim
 license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
-dependencies = []
+dependencies = [
+    "typer",
+    "wandb",
+    "transformers<4.37",
+    "plotly",
+    "seaborn",
+    "pandas",
+    "onnxruntime",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
