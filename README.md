@@ -82,3 +82,33 @@ cd ../SINGER
 docker compose build
 docker compose run --rm singer
 ```
+
+## Usage
+
+All commands run inside the Docker container. The main entry point is `notebooks/ssv_multi3dgs_campaign.py`.
+
+```bash
+# Generate RRT rollout data
+python notebooks/ssv_multi3dgs_campaign.py generate-rollouts --config-file configs/experiment/ssv_multi3dgs.yml
+
+# Generate observations from rollouts
+python notebooks/ssv_multi3dgs_campaign.py generate-observations --config-file configs/experiment/ssv_multi3dgs.yml
+
+# Train policy (two stages)
+python notebooks/ssv_multi3dgs_campaign.py train-history --config-file configs/experiment/ssv_multi3dgs.yml
+python notebooks/ssv_multi3dgs_campaign.py train-command --config-file configs/experiment/ssv_multi3dgs.yml
+
+# Simulate trained policy vs expert
+python notebooks/ssv_multi3dgs_campaign.py simulate --config-file configs/experiment/ssv_multi3dgs.yml
+```
+
+See `notebooks/simulating_trajectories.md` for details on configuring single-trajectory runs and using pre-generated trajectories.
+
+### Key config files
+
+| File | Controls |
+|------|----------|
+| `configs/experiment/ssv_multi3dgs.yml` | Cohort, method, flights, roster |
+| `configs/scenes/{scene}.yml` | Semantic queries, radii, altitudes, RRT branches |
+| `configs/method/rrt.json` | Rollout params, perturbation bounds, policy |
+
